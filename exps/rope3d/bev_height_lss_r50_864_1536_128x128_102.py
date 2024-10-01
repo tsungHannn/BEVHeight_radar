@@ -21,8 +21,8 @@ from models.bev_height import BEVHeight
 from utils.torch_dist import all_gather_object, get_rank, synchronize
 from utils.backup_files import backup_codebase
 
-H = 1080
-W = 1920
+H = 1536
+W = 2048
 final_dim = (864, 1536)
 # final_dim = (432, 768)
 img_conf = dict(img_mean=[123.675, 116.28, 103.53],
@@ -401,9 +401,9 @@ class BEVHeightLightningModel(LightningModule):
             rda_aug_conf=self.rda_aug_conf,
             classes=self.class_names,
             data_root=self.data_root,
-            # info_path=os.path.join(data_root, 'rope3d_12hz_infos_hom_train.pkl'),
+            info_path=os.path.join(data_root, 'rope3d_12hz_infos_hom_train.pkl'),
             # info_path="/NAS/Rope3D/two_data.pkl",
-            info_path="/NAS/ncsist/rope3d_12hz_infos_hom_train.pkl",
+            # info_path="/NAS/ncsist/rope3d_12hz_infos_hom_train.pkl",
             is_train=True,
             use_cbgs=self.data_use_cbgs,
             img_conf=self.img_conf,
@@ -434,8 +434,8 @@ class BEVHeightLightningModel(LightningModule):
             rda_aug_conf=self.rda_aug_conf,
             classes=self.class_names,
             data_root=self.data_root,
-            # info_path=os.path.join(data_root, 'rope3d_12hz_infos_hom_val.pkl'),
-            info_path="/NAS/ncsist/rope3d_12hz_infos_hom_train.pkl",
+            info_path=os.path.join(data_root, 'rope3d_12hz_infos_hom_val.pkl'),
+            # info_path="/NAS/ncsist/rope3d_12hz_infos_hom_train.pkl",
             is_train=False,
             img_conf=self.img_conf,
             num_sweeps=self.num_sweeps,

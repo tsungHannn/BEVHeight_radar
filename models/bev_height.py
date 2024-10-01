@@ -70,7 +70,7 @@ class BEVHeight(nn.Module):
             x, height_pred = self.backbone(x,
                                           mats_dict,
                                           timestamps,
-                                          is_return_height=False)
+                                          is_return_height=True)
             preds = self.head(x)
             return preds, height_pred
         else:
