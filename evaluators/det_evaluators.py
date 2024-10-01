@@ -3,12 +3,16 @@ Modified from https://github.com/nutonomy/nuscenes-devkit/blob/57889ff2067857702
 '''
 import os.path as osp
 import tempfile
+import os
 
 import mmcv
+import mmcv.utils
 import numpy as np
 import pyquaternion
 from nuscenes.utils.data_classes import Box
 from pyquaternion import Quaternion
+from mmengine.utils.progressbar import track_iter_progress
+import mmengine
 
 from evaluators.result2kitti import result2kitti, result2kitti_rope3d, kitti_evaluation
 
@@ -110,7 +114,7 @@ class RoadSideEvaluator():
         mapped_class_names = self.class_names
 
         print('Start to convert detection format...')
-        for sample_id, det in enumerate(mmcv.track_iter_progress(results)):
+        for sample_id, det in enumerate(track_iter_progress(results)):
             boxes, scores, labels = det
             boxes = boxes
             sample_token = img_metas[sample_id]['token']
@@ -169,10 +173,13 @@ class RoadSideEvaluator():
             'meta': self.modality,
             'results': nusc_annos,
         }
-        mmcv.mkdir_or_exist(jsonfile_prefix)
+        # mmcv.mkdir_or_exist(jsonfile_prefix)
+        os.makedirs(jsonfile_prefix, exist_ok=True)
         res_path = osp.join(jsonfile_prefix, 'results_nusc.json')
         print('Results writes to', res_path)
-        mmcv.dump(nusc_submissions, res_path)
+        # mmcv.dump(nusc_submissions, res_path)
+        mmengine.dump(nusc_submissions, res_path)
+        
         return res_path
 
     def _format_bbox_rope3d(self, results, jsonfile_prefix=None):
@@ -180,7 +187,7 @@ class RoadSideEvaluator():
         mapped_class_names = self.CLASSES
         
         print('Start to convert detection format...')
-        for sample_id, det in enumerate(mmcv.track_iter_progress(results)):
+        for sample_id, det in enumerate(track_iter_progress(results)):
             annos = []
             sample_token = self.data_infos[sample_id]['token']
             

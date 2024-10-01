@@ -3,6 +3,7 @@ from argparse import ArgumentParser, Namespace
 
 import os
 import mmcv
+import mmcv.utils
 import pytorch_lightning as pl
 import torch
 import torch.nn.parallel
@@ -13,7 +14,6 @@ from pytorch_lightning.core import LightningModule
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
 from torch.optim.lr_scheduler import MultiStepLR
-
 
 from dataset.nusc_mv_det_dataset import NuscMVDetDataset, collate_fn
 from evaluators.det_evaluators import RoadSideEvaluator
@@ -170,8 +170,8 @@ head_conf = {
     'train_cfg': train_cfg,
     'test_cfg': test_cfg,
     'in_channels': 256,  # Equal to bev_neck output_channels.
-    'loss_cls': dict(type='GaussianFocalLoss', reduction='mean'),
-    'loss_bbox': dict(type='L1Loss', reduction='mean', loss_weight=0.25),
+    'loss_cls': dict(type='mmdet.GaussianFocalLoss', reduction='mean'),
+    'loss_bbox': dict(type='mmdet.L1Loss', reduction='mean', loss_weight=0.25),
     'gaussian_overlap': 0.1,
     'min_radius': 2,
 }
@@ -205,7 +205,8 @@ class BEVHeightLightningModel(LightningModule):
         self.head_conf = head_conf
         self.ida_aug_conf = ida_aug_conf
         self.rda_aug_conf = rda_aug_conf
-        mmcv.mkdir_or_exist(default_root_dir)
+        # mmcv.mkdir_or_exist(default_root_dir)
+        os.makedirs(default_root_dir, exist_ok=True)
         self.default_root_dir = default_root_dir
         self.evaluator = RoadSideEvaluator(class_names=self.class_names,
                                            current_classes=["Car", "Bus"],
@@ -392,7 +393,12 @@ class BEVHeightLightningModel(LightningModule):
         optimizer = torch.optim.AdamW(self.model.parameters(),
                                       lr=lr,
                                       weight_decay=1e-7)
-        scheduler = MultiStepLR(optimizer, [19, 23])
+        # scheduler = MultiStepLR(optimizer, [19, 23])
+        scheduler = {
+        'scheduler': MultiStepLR(optimizer, milestones=[19, 23]),
+        'interval': 'epoch',  # 调度器更新的频率，默认为每个 epoch
+        'frequency': 1  # 每个 epoch 更新一次
+        }
         return [[optimizer], [scheduler]]
 
     def train_dataloader(self):

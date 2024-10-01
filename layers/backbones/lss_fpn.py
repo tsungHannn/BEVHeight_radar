@@ -4,8 +4,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from mmcv.cnn import build_conv_layer
-from mmdet3d.models import build_neck
-from mmdet.models import build_backbone
+# from mmdet3d.models import build_neck
+# from mmdet.models import build_backbone
+from mmdet3d.registry import MODELS as mmdet3d_MODELS
+from mmdet.registry import MODELS as mmdet_MODELS
 from mmdet.models.backbones.resnet import BasicBlock
 from torch import nn
 
@@ -297,8 +299,10 @@ class LSSFPN(nn.Module):
         self.register_buffer('frustum', self.create_frustum())
         self.height_channels, _, _, _ = self.frustum.shape
 
-        self.img_backbone = build_backbone(img_backbone_conf)
-        self.img_neck = build_neck(img_neck_conf)
+        # self.img_backbone = build_backbone(img_backbone_conf)
+        # self.img_neck = build_neck(img_neck_conf)
+        self.img_backbone = mmdet_MODELS.build(img_backbone_conf)
+        self.img_neck = mmdet3d_MODELS.build(img_neck_conf)
         self.height_net = self._configure_height_net(height_net_conf)
 
         self.img_neck.init_weights()

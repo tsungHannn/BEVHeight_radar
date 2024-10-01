@@ -103,6 +103,7 @@ class BEVHeight(nn.Module):
         """
         return self.head.get_targets(gt_boxes, gt_labels)
 
+
     def loss(self, targets, preds_dicts):
         """Loss function for BEVHeight.
 
