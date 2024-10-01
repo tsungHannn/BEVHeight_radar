@@ -12,10 +12,13 @@ def kitti_visual_tool(data_root, demo_dir):
         raise ValueError("data_root Not Found")
     image_path = os.path.join(data_root, "training/image_2")
     calib_path = os.path.join(data_root, "training/calib")
-    # label_path = os.path.join(data_root, "training/label_2")
-    label_path = "outputs/data"
+    label_path = os.path.join(data_root, "training/label_2")
+    # label_path = "outputs/data"
     image_ids = []
-    for image_file in os.listdir(image_path):
+    all_file = os.listdir(label_path)
+    all_file.sort()
+    
+    for image_file in all_file:
         image_ids.append(image_file.split(".")[0])
     for i in range(len(image_ids)):
         if os.path.exists(os.path.join(image_path, str(image_ids[i]) + ".png")):
