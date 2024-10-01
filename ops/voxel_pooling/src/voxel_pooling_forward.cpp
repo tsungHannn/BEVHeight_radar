@@ -1,16 +1,12 @@
-// Copyright (c) Megvii Inc. All rights reserved.
-#include <THC/THC.h>
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 #include <torch/extension.h>
 #include <torch/serialize/tensor.h>
-
+#include <c10/cuda/CUDAStream.h>  // Use this to get the current CUDA stream
 #include <vector>
 
-extern THCState *state;
-
 #define CHECK_CUDA(x) \
-  TORCH_CHECK(x.type().is_cuda(), #x, " must be a CUDAtensor ")
+  TORCH_CHECK(x.is_cuda(), #x, " must be a CUDAtensor ")
 #define CHECK_CONTIGUOUS(x) \
   TORCH_CHECK(x.is_contiguous(), #x, " must be contiguous ")
 #define CHECK_INPUT(x) \
@@ -27,14 +23,17 @@ int voxel_pooling_forward_wrapper(int batch_size, int num_points, int num_channe
                        at::Tensor input_features_tensor, at::Tensor output_features_tensor, at::Tensor pos_memo_tensor) {
     CHECK_INPUT(geom_xyz_tensor);
     CHECK_INPUT(input_features_tensor);
+    
     const int *geom_xyz = geom_xyz_tensor.data_ptr<int>();
     const float *input_features = input_features_tensor.data_ptr<float>();
     float *output_features = output_features_tensor.data_ptr<float>();
     int *pos_memo = pos_memo_tensor.data_ptr<int>();
 
-    cudaStream_t stream = at::cuda::getCurrentCUDAStream().stream();
+    // Use the c10::cuda API to get the current CUDA stream
+    cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+    
     voxel_pooling_forward_kernel_launcher(batch_size, num_points, num_channels, num_voxel_x, num_voxel_y, num_voxel_z, geom_xyz, input_features,
-                                output_features, pos_memo, stream);
+                                          output_features, pos_memo, stream);
     return 1;
 }
 

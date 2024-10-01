@@ -4,9 +4,11 @@ import cv2
 
 import random
 import mmcv
+import mmengine
 import numpy as np
 import torch
-from mmdet3d.core.bbox.structures.lidar_box3d import LiDARInstance3DBoxes
+# from mmdet3d.core.bbox.structures.lidar_box3d import LiDARInstance3DBoxes
+from mmdet3d.structures.bbox_3d import LiDARInstance3DBoxes
 from nuscenes.utils.data_classes import Box
 from PIL import Image
 from pyquaternion import Quaternion
@@ -266,7 +268,8 @@ class NuscMVDetDataset(Dataset):
                 default: list().
         """
         super().__init__()
-        self.infos = mmcv.load(info_path)
+        # self.infos = mmcv.load(info_path)
+        self.infos = mmengine.load(info_path)
         self.is_train = is_train
         self.ida_aug_conf = ida_aug_conf
         self.rda_aug_conf = rda_aug_conf

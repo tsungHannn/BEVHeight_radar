@@ -2,9 +2,16 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from mmcv.cnn import bias_init_with_prob
+import numpy as np
+# from mmcv.cnn import bias_init_with_prob
+def bias_init_with_prob(prior_prob):
+    """initialize conv/fc bias value according to a given probability value."""
+    bias_init = float(-np.log((1 - prior_prob) / prior_prob))
+    return bias_init
+
 from mmcv.ops import Voxelization
-from mmdet3d.models import builder
+# from mmdet3d.models import builder
+from mmdet3d.registry import MODELS
 
 
 class PtsBackbone(nn.Module):
@@ -47,14 +54,18 @@ class PtsBackbone(nn.Module):
         super(PtsBackbone, self).__init__()
 
         self.pts_voxel_layer = Voxelization(**pts_voxel_layer)
-        self.pts_voxel_encoder = builder.build_voxel_encoder(pts_voxel_encoder)
-        self.pts_middle_encoder = builder.build_middle_encoder(pts_middle_encoder)
-        self.pts_backbone = builder.build_backbone(pts_backbone)
+        # self.pts_voxel_encoder = builder.build_voxel_encoder(pts_voxel_encoder)
+        # self.pts_middle_encoder = builder.build_middle_encoder(pts_middle_encoder)
+        # self.pts_backbone = builder.build_backbone(pts_backbone)
+        self.pts_voxel_encoder = MODELS.build(pts_voxel_encoder)
+        self.pts_middle_encoder = MODELS.build(pts_middle_encoder)
+        self.pts_backbone = MODELS.build(pts_backbone)
         self.return_context = return_context
         self.return_occupancy = return_occupancy
         mid_channels = pts_backbone['out_channels'][-1]
         if pts_neck is not None:
-            self.pts_neck = builder.build_neck(pts_neck)
+            # self.pts_neck = builder.build_neck(pts_neck)
+            self.pts_neck = MODELS.build(pts_neck)
             mid_channels = sum(pts_neck['out_channels'])
         else:
             self.pts_neck = None
