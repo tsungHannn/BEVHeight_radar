@@ -12,6 +12,7 @@ import torchvision.models as models
 from pytorch_lightning.core import LightningModule
 from pytorch_lightning.callbacks import ModelCheckpoint
 from torch.optim.lr_scheduler import MultiStepLR
+from pytorch_lightning.plugins import DDPPlugin
 
 from dataset.nusc_mv_det_dataset import NuscMVDetDataset, collate_fn
 from evaluators.det_evaluators import RoadSideEvaluator
@@ -19,8 +20,8 @@ from models.bev_height import BEVHeight
 from utils.torch_dist import all_gather_object, get_rank, synchronize
 from utils.backup_files import backup_codebase
 
-H = 1080
-W = 1920
+H = 1536
+W = 2048
 final_dim = (864, 1536)
 img_conf = dict(img_mean=[123.675, 116.28, 103.53],
                 img_std=[58.395, 57.12, 57.375],
@@ -69,6 +70,11 @@ ida_aug_conf = {
     'bot_pct_lim': (0.0, 0.0),
     'cams': ['CAM_FRONT'],
     'Ncams': 1,
+}
+rda_aug_conf = {
+    'N_sweeps': 6,
+    'N_use': 5,
+    'drop_ratio': 0.1,
 }
 
 bev_backbone = dict(
@@ -162,8 +168,8 @@ head_conf = {
     'train_cfg': train_cfg,
     'test_cfg': test_cfg,
     'in_channels': 256,  # Equal to bev_neck output_channels.
-    'loss_cls': dict(type='GaussianFocalLoss', reduction='mean'),
-    'loss_bbox': dict(type='L1Loss', reduction='mean', loss_weight=0.25),
+    'loss_cls': dict(type='mmdet.GaussianFocalLoss', reduction='mean'),
+    'loss_bbox': dict(type='mmdet.L1Loss', reduction='mean', loss_weight=0.25),
     'gaussian_overlap': 0.1,
     'min_radius': 2,
 }
@@ -196,14 +202,16 @@ class BEVHeightLightningModel(LightningModule):
         self.backbone_conf = backbone_conf
         self.head_conf = head_conf
         self.ida_aug_conf = ida_aug_conf
-        mmcv.mkdir_or_exist(default_root_dir)
+        self.rda_aug_conf = rda_aug_conf
+        # mmcv.mkdir_or_exist(default_root_dir)
+        os.makedirs(default_root_dir, exist_ok=True)
         self.default_root_dir = default_root_dir
         self.evaluator = RoadSideEvaluator(class_names=self.class_names,
                                            current_classes=["Car", "Bus"],
                                            data_root=data_root,
                                            gt_label_path=gt_label_path,
                                            output_dir=self.default_root_dir)
-        self.model = BEVHeight(self.backbone_conf, self.head_conf)
+        
         self.mode = 'valid'
         self.img_conf = img_conf
         self.data_use_cbgs = False
@@ -215,34 +223,99 @@ class BEVHeightLightningModel(LightningModule):
         self.dbound = self.backbone_conf['d_bound']
         self.height_channels = int(self.dbound[2])
 
-    def forward(self, sweep_imgs, mats):
-        return self.model(sweep_imgs, mats)
+        # Radar Branch
+        ################################################
+        self.backbone_pts_conf = {
+            'pts_voxel_layer': dict(
+                max_num_points=8,
+                voxel_size=[8, 0.4, 2],
+                point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],
+                max_voxels=(768, 1024)
+            ),
+            'pts_voxel_encoder': dict(
+                type='PillarFeatureNet',
+                in_channels=5,
+                feat_channels=[32, 64],
+                with_distance=False,
+                with_cluster_center=False,
+                with_voxel_center=True,
+                voxel_size=[8, 0.4, 2],
+                point_cloud_range=[0, 2.0, 0, 704, 58.0, 2],
+                norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01),
+                legacy=True
+            ),
+            'pts_middle_encoder': dict(
+                type='PointPillarsScatter',
+                in_channels=64,
+                output_shape=(352, 352) # 原本是(140, 88)，在r50_102裡面改成(256,256)
+            ),
+            'pts_backbone': dict(
+                type='SECOND',
+                in_channels=64,
+                out_channels=[64, 128, 256],
+                layer_nums=[3, 5, 5],
+                layer_strides=[1, 2, 2],
+                norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+                conv_cfg=dict(type='Conv2d', bias=True, padding_mode='reflect')
+            ),
+            'pts_neck': dict(
+                type='SECONDFPN',
+                in_channels=[64, 128, 256],
+                out_channels=[128, 128, 128],
+                upsample_strides=[0.5, 1, 2],
+                norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+                upsample_cfg=dict(type='deconv', bias=False),
+                use_conv_for_no_stride=True
+            ),
+            'occupancy_init': 0.01,
+            'out_channels_pts': 80,
+        }
+        ################################################
+
+        # Fusion module
+        ################################################
+        # 還沒用到(應該會用在fusion_module.py)
+        self.fuser_conf = {
+            'img_dims': 80,
+            'pts_dims': 80,
+            'embed_dims': 128,
+            'num_layers': 6,
+            'num_heads': 4,
+            'bev_shape': (128, 128),
+        }
+        ################################################
+
+        self.model = BEVHeight(self.backbone_conf, self.head_conf, self.backbone_pts_conf)
+
+
+    def forward(self, sweep_imgs, mats, radarData):
+        return self.model(sweep_imgs, mats, radarData)
 
     def training_step(self, batch):
-        (sweep_imgs, mats, _, _, gt_boxes, gt_labels) = batch
+        (sweep_imgs, mats, _, _, gt_boxes, gt_labels, _, radarData) = batch
         if torch.cuda.is_available():
             for key, value in mats.items():
                 mats[key] = value.cuda()
             sweep_imgs = sweep_imgs.cuda()
             gt_boxes = [gt_box.cuda() for gt_box in gt_boxes]
             gt_labels = [gt_label.cuda() for gt_label in gt_labels]
-        preds = self(sweep_imgs, mats)
+        preds = self(sweep_imgs, mats, radarData)
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             targets = self.model.module.get_targets(gt_boxes, gt_labels)
             detection_loss = self.model.module.loss(targets, preds)
         else:
             targets = self.model.get_targets(gt_boxes, gt_labels)
-            detection_loss = self.model.loss(targets, preds)  
+            detection_loss = self.model.loss(targets, preds)
         self.log('detection_loss', detection_loss)
         return detection_loss
 
     def eval_step(self, batch, batch_idx, prefix: str):
-        (sweep_imgs, mats, _, img_metas, _, _) = batch
+        (sweep_imgs, mats, _, img_metas, _, _, _, radarData) = batch
         if torch.cuda.is_available():
             for key, value in mats.items():
                 mats[key] = value.cuda()
             sweep_imgs = sweep_imgs.cuda()
-        preds = self.model(sweep_imgs, mats)
+        preds = self.model(sweep_imgs, mats, radarData)
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             results = self.model.module.get_bboxes(preds, img_metas)
         else:
@@ -298,12 +371,18 @@ class BEVHeightLightningModel(LightningModule):
         optimizer = torch.optim.AdamW(self.model.parameters(),
                                       lr=lr,
                                       weight_decay=1e-7)
-        scheduler = MultiStepLR(optimizer, [19, 23])
+        # scheduler = MultiStepLR(optimizer, [19, 23])
+        scheduler = {
+        'scheduler': MultiStepLR(optimizer, milestones=[19, 23]),
+        'interval': 'epoch',  # 调度器更新的频率，默认为每个 epoch
+        'frequency': 1  # 每个 epoch 更新一次
+        }
         return [[optimizer], [scheduler]]
 
     def train_dataloader(self):
         train_dataset = NuscMVDetDataset(
             ida_aug_conf=self.ida_aug_conf,
+            rda_aug_conf=self.rda_aug_conf,
             classes=self.class_names,
             data_root=self.data_root,
             info_path=os.path.join(data_root, 'rope3d_12hz_infos_hom_train.pkl'),
@@ -314,13 +393,15 @@ class BEVHeightLightningModel(LightningModule):
             sweep_idxes=self.sweep_idxes,
             key_idxes=self.key_idxes,
             return_depth=False,
+            return_radar_pv=True,
+            radar_pv_path="lidar",
         )
         from functools import partial
 
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=self.batch_size_per_device,
-            num_workers=4,
+            num_workers=8,
             drop_last=True,
             shuffle=False,
             collate_fn=partial(collate_fn,
@@ -332,6 +413,7 @@ class BEVHeightLightningModel(LightningModule):
     def val_dataloader(self):
         val_dataset = NuscMVDetDataset(
             ida_aug_conf=self.ida_aug_conf,
+            rda_aug_conf=self.rda_aug_conf,
             classes=self.class_names,
             data_root=self.data_root,
             info_path=os.path.join(data_root, 'rope3d_12hz_infos_hom_val.pkl'),
@@ -341,13 +423,15 @@ class BEVHeightLightningModel(LightningModule):
             sweep_idxes=self.sweep_idxes,
             key_idxes=self.key_idxes,
             return_depth=False,
+            return_radar_pv=True,
+            radar_pv_path="lidar",
         )
         val_loader = torch.utils.data.DataLoader(
             val_dataset,
             batch_size=self.batch_size_per_device,
             shuffle=False,
             collate_fn=collate_fn,
-            num_workers=4,
+            num_workers=8,
             sampler=None,
         )
         return val_loader
@@ -369,7 +453,8 @@ def main(args: Namespace) -> None:
     
     model = BEVHeightLightningModel(**vars(args))
     checkpoint_callback = ModelCheckpoint(dirpath='./outputs/bev_height_lss_r50_864_1536_128x128/checkpoints', filename='{epoch}', every_n_epochs=5, save_last=True, save_top_k=-1)
-    trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback])
+    # trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback])
+    trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback], strategy=DDPPlugin(find_unused_parameters=False)) # 好像是allen debug的
     if args.evaluate:
         for ckpt_name in os.listdir(args.ckpt_path):
             model_pth = os.path.join(args.ckpt_path, ckpt_name)
@@ -397,13 +482,14 @@ def run_cli():
         profiler='simple',
         deterministic=False,
         max_epochs=20,
-        accelerator='ddp',
+        # accelerator='ddp',
         num_sanity_val_steps=0,
         gradient_clip_val=5,
         limit_val_batches=0,
         enable_checkpointing=True,
         precision=32,
-        default_root_dir='./outputs/bev_height_lss_r50_864_1536_128x128')
+        default_root_dir='./outputs/bev_height_lss_r50_864_1536_128x128',
+        log_every_n_steps=1)
     args = parser.parse_args()
     main(args)
 

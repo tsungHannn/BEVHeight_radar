@@ -425,7 +425,7 @@ class BEVHeightLightningModel(LightningModule):
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=self.batch_size_per_device,
-            num_workers=0,
+            num_workers=8,
             drop_last=True,
             shuffle=False,
             collate_fn=partial(collate_fn,
@@ -456,7 +456,7 @@ class BEVHeightLightningModel(LightningModule):
             batch_size=self.batch_size_per_device,
             shuffle=False,
             collate_fn=collate_fn,
-            num_workers=0,
+            num_workers=8,
             sampler=None,
         )
         return val_loader
@@ -482,10 +482,9 @@ def main(args: Namespace) -> None:
     # summary(model)
     #input("MODEL")
     checkpoint_callback = ModelCheckpoint(dirpath='./outputs/bev_height_lss_r50_864_1536_128x128/checkpoints', filename='{epoch}', every_n_epochs=5, save_last=True, save_top_k=-1)
-    trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback])
-    # trainer = pl.Trainer.from_argparse_args(args, strategy=DDPPlugin(find_unused_parameters=False)) # 好像是allen debug的
+    # trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback])
+    trainer = pl.Trainer.from_argparse_args(args, callbacks=[checkpoint_callback], strategy=DDPPlugin(find_unused_parameters=False)) # 好像是allen debug的
     if args.evaluate:
-        input("EVAL")
         for ckpt_name in os.listdir(args.ckpt_path):
             model_pth = os.path.join(args.ckpt_path, ckpt_name)
             trainer.test(model, ckpt_path=model_pth)
