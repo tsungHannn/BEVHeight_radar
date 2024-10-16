@@ -493,7 +493,9 @@ def main(args: Namespace) -> None:
         backup_codebase(os.path.join('./outputs/bev_height_lss_r50_864_1536_128x128', 'backup'))
         # trainer.fit(model)
         # 检查是否提供了 resume_from_checkpoint 参数
-        if args.resume_from_checkpoint:
+        if args.resume_from:
+            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+            print("Resume from", args.resume_from)
             trainer.fit(model, ckpt_path=args.resume_from_checkpoint)
         else:
             trainer.fit(model)
@@ -512,7 +514,7 @@ def run_cli():
                                default=0,
                                help='seed for initializing training.')
     parent_parser.add_argument('--ckpt_path', type=str)
-    parent_parser.add_argument('--resume_from_checkpoint', type=str, help='path to checkpoint to resume training from')  # 新增resume参数
+    parent_parser.add_argument('--resume_from', type=str, help='path to checkpoint to resume training from')  # 新增resume参数
     parser = BEVHeightLightningModel.add_model_specific_args(parent_parser)
     parser.set_defaults(
         profiler='simple',
